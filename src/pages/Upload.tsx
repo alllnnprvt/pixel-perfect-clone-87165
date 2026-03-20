@@ -19,29 +19,6 @@ const Upload = () => {
   const [generating, setGenerating] = useState(false);
   const [step, setStep] = useState(0);
 
-  const generateWithAI = async (noteText: string, prompt: string) => {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Gemini API key not configured");
-
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt.replace("{noteText}", noteText) }] }],
-        }),
-      }
-    );
-
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    // Extract JSON from response
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error("Failed to parse AI response");
-    return JSON.parse(jsonMatch[0]);
-  };
-
   const handleGenerate = async () => {
     if (!title.trim() || !content.trim()) {
       toast.error("Please enter a title and some notes");
@@ -52,23 +29,18 @@ const Upload = () => {
 
     try {
       setStep(0);
-      const flashcards = await generateWithAI(
-        content,
-        'Generate 10 flashcard question-answer pairs from these notes.\nReturn only a JSON array: [{"question":"...","answer":"..."}]\nNotes: {noteText}'
+      const { data: aiData, error: aiError } = await supabase.functions.invoke(
+        "generate-study-materials",
+        { body: { noteText: content } }
       );
+
+      if (aiError) throw new Error(aiError.message || "AI generation failed");
+      if (aiData?.error) throw new Error(aiData.error);
 
       setStep(1);
-      const quiz = await generateWithAI(
-        content,
-        'Generate 5 multiple choice questions from these notes.\nReturn only a JSON array: [{"question":"...","options":["A","B","C","D"],"answer":"A"}]\nNotes: {noteText}'
-      );
+      const { flashcards, quiz, explanations } = aiData;
 
       setStep(2);
-      const explanations = await generateWithAI(
-        content,
-        'Find the 3 hardest concepts in these notes. Explain each simply.\nReturn only a JSON array: [{"concept":"...","explanation":"..."}]\nNotes: {noteText}'
-      );
-
       const { data, error } = await supabase
         .from("notes")
         .insert({
